@@ -1,0 +1,20 @@
+(kicad_sch
+  (version 20250114)
+  (generator "kicad_file_doctor_demo")
+  (lib_symbols
+    (symbol "Device:R"
+      (pin_numbers hide)
+      (property "Reference" "R" (at 2.032 0 90))
+    )
+  )
+  (symbol
+    (lib_id "Device:R")
+    (at 100 50 0)
+    (property "Reference" "R1" (at 102 49 0))
+  )
+  (symbol
+    (lib_id "Device:C")
+    (at 120 50 0)
+    (property "Reference" "C1" (at 122 49 0))
+  )
+)
