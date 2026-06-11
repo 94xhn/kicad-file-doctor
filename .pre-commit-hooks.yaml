@@ -1,0 +1,6 @@
+- id: kicad-file-doctor
+  name: kicad-file-doctor
+  description: Diagnose KiCad file defects (encoding, structure, silent-load failures)
+  entry: kicad-file-doctor
+  language: python
+  files: \.(kicad_pcb|kicad_sch)$

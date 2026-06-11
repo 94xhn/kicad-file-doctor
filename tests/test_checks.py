@@ -33,8 +33,11 @@ def test_invalid_utf8_reported_with_line():
 # ------------------------------------------------------------------ balance
 
 
-def test_stray_close_paren_with_line():
+def test_stray_close_paren_is_warning_with_line():
+    # KiCad tolerates stray ')' (verified: official demo board with 349 of
+    # them still loads in pcbnew) — report as warning, not error
     (finding,) = by_check(run("(kicad_pcb\n)\n)"), "unbalanced")
+    assert finding.severity == "warning"
     assert finding.line == 3
     assert "stray ')'" in finding.message
 
@@ -90,25 +93,18 @@ def test_float_findings_truncated():
 # ----------------------------------------------------------------- gr_text
 
 
-def test_grtext_literal_newline_warned():
-    (finding,) = by_check(
-        run('(kicad_pcb (gr_text "line1\\\\nline2" (at 0 0)))'.replace("\\\\", "\\")),
-        "grtext-newline",
-    )
-    assert finding.severity == "warning"
-
-
-def test_grtext_justify_warned_top_level_only():
+def test_grtext_newline_and_justify_not_flagged():
+    # KiCad's own demo boards store multi-line text with \n escapes and use
+    # (justify ...) in top-level gr_text extensively — both load fine, so
+    # neither is checked (earlier drafts flagged them; dropped as false
+    # positives after the official-demo-board calibration run).
     text = (
         "(kicad_pcb\n"
-        '  (gr_text "hi" (at 0 0) (effects (font (size 1 1)) (justify left)))\n'
-        '  (footprint "L:X" (layer "F.Cu") (at 0 0)\n'
-        '    (fp_text user "ok" (at 0 0) (effects (justify left)))\n'
-        "  )\n"
+        '  (gr_text "line1\\nline2" (at 0 0) '
+        "(effects (font (size 1 1)) (justify left)))\n"
         ")"
     )
-    findings = by_check(run(text), "grtext-justify")
-    assert len(findings) == 1  # the footprint's fp_text justify is legal
+    assert errors(run(text)) == []
 
 
 # ----------------------------------------------------------- pcb tree checks
@@ -127,9 +123,12 @@ def pcb(*fps: str) -> str:
     return "(kicad_pcb (version 20241229)\n" + "".join(fps) + ")"
 
 
-def test_duplicate_references_reported():
+def test_duplicate_references_reported_as_warning():
+    # warning, not error: duplicate refs are legal (official demo boards use
+    # stitching-via arrays on purpose) but DSN export does fail on them
     text = pcb(FP.format(ref="R1", extra=""), FP.format(ref="R1", extra=""))
     (finding,) = by_check(run(text), "dup-reference")
+    assert finding.severity == "warning"
     assert "'R1'" in finding.message and "2 footprints" in finding.message
     assert "DSN" in finding.message
 
@@ -236,3 +235,16 @@ def test_ftype_detected():
     assert diagnose(b"(kicad_sch)")["ftype"] == "kicad_sch"
     assert diagnose(b"(kicad_pcb)")["ftype"] == "kicad_pcb"
     assert diagnose(b"hello")["ftype"] == "unknown"
+
+
+def test_orphaned_forms_counted_in_summary():
+    # forms after an early-closed root still belong to the board
+    text = (
+        "(kicad_pcb (version 20241229))\n"
+        '(footprint "L:R" (layer "F.Cu") (at 0 0)\n'
+        '  (property "Reference" "R1" (at 0 0 0))\n'
+        '  (pad "1" smd rect (at 0 0) (size 1 1))\n'
+        ")\n"
+    )
+    (summary,) = by_check(run(text), "summary")
+    assert "1 footprints (1 pads)" in summary.message

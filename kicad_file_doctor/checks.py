@@ -23,7 +23,6 @@ from .sexp import parse
 FP_FILE_FIELDS_ERROR = ("version", "generator", "generator_version")
 
 _FLOAT_RE = re.compile(r"-?\d+\.\d{7,}")
-_GRTEXT_NL_RE = re.compile(r'\(gr_text\b[^"\n]*"(?:[^"\\]|\\.)*?\\n')
 
 
 @dataclass(frozen=True)
@@ -83,11 +82,16 @@ def check_balance(text: str) -> list[Finding]:
             open_lines.append(line)
         elif ch == ")":
             if not open_lines:
+                # warning, not error: KiCad's own parser tolerates stray ')'
+                # (an official demo board carries hundreds and loads fine) —
+                # but stricter S-expression tools will choke on them.
                 return [
                     Finding(
                         "unbalanced",
-                        "error",
-                        f"stray ')' at line {line} with no matching '('",
+                        "warning",
+                        f"stray ')' at line {line} with no matching '(' - "
+                        "KiCad itself tolerates this and still loads the "
+                        "file, but strict S-expression tools will not",
                         line=line,
                     )
                 ]
@@ -152,21 +156,11 @@ def check_float_precision(text: str, *, limit: int = 10) -> list[Finding]:
     return findings
 
 
-def check_text_newlines(text: str) -> list[Finding]:
-    findings: list[Finding] = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        if _GRTEXT_NL_RE.search(line):
-            findings.append(
-                Finding(
-                    "grtext-newline",
-                    "warning",
-                    f"line {lineno}: gr_text contains a literal \\n escape - "
-                    "known to make some KiCad 10 builds reject the board; "
-                    "split multi-line text into one gr_text per line",
-                    line=lineno,
-                )
-            )
-    return findings
+# NOTE: earlier drafts also flagged literal \n escapes and (justify ...)
+# inside top-level gr_text. Both were dropped after running KiCad's own demo
+# boards: 6/12 official boards store multi-line text with \n escapes and one
+# board alone carries 1000+ justified gr_text nodes — all load fine. A check
+# that fires on official demo boards is a false positive by definition.
 
 
 # ------------------------------------------------------------- tree helpers
@@ -214,13 +208,16 @@ def check_duplicate_references(root: list) -> list[Finding]:
             if placeholder
             else ""
         )
+        # warning, not error: duplicate references are legal in KiCad and
+        # official demo boards use them on purpose (stitching-via arrays,
+        # microwave polygons) — but Specctra DSN export does fail on them.
         findings.append(
             Finding(
                 "dup-reference",
-                "error",
+                "warning",
                 f"reference '{ref}' is used by {count} footprints{hint} - "
-                "Specctra DSN export fails silently (0-byte file) on "
-                "duplicate references",
+                "legal, but Specctra DSN export fails silently (0-byte "
+                "file) on duplicate references",
             )
         )
     return findings
@@ -267,25 +264,6 @@ def check_sheet_paths(root: list) -> list[Finding]:
                             "not match this footprint",
                         )
                     )
-    return findings
-
-
-def check_grtext_justify(root: list) -> list[Finding]:
-    findings: list[Finding] = []
-    for node in _children(root):
-        if node[0] != "gr_text":
-            continue
-        if _subtree_has_head(node, "justify"):
-            label = str(node[1])[:24] if len(node) >= 2 else ""
-            findings.append(
-                Finding(
-                    "grtext-justify",
-                    "warning",
-                    f"top-level gr_text \"{label}\" contains (justify ...) - "
-                    "known to make some KiCad 10 builds reject the board; "
-                    "keep justify inside footprints' fp_text only",
-                )
-            )
     return findings
 
 
@@ -388,7 +366,6 @@ def diagnose(data: bytes) -> dict:
 
     findings += check_balance(text)
     findings += check_float_precision(text)
-    findings += check_text_newlines(text)
 
     ftype = "unknown"
     parsed = False
@@ -401,6 +378,13 @@ def diagnose(data: bytes) -> dict:
     root = next((f for f in forms if isinstance(f, list) and f), None)
     if root is not None:
         ftype = str(root[0])
+        # A stray ')' can close the root early, orphaning the rest of the
+        # file as top-level forms; KiCad still loads such files, so fold the
+        # orphans back in before running the structural checks.
+        root_idx = forms.index(root)
+        orphans = [n for n in forms[root_idx + 1 :] if isinstance(n, list) and n]
+        if orphans:
+            root = list(root) + orphans
 
     if not parsed or root is None:
         findings.append(
@@ -415,7 +399,6 @@ def diagnose(data: bytes) -> dict:
         findings += check_duplicate_references(root)
         findings += check_footprint_file_fields(root)
         findings += check_sheet_paths(root)
-        findings += check_grtext_justify(root)
         findings.append(pcb_summary(root))
     elif ftype == "kicad_sch":
         findings += check_lib_symbols(root)

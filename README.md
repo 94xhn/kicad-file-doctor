@@ -49,29 +49,29 @@ Exit codes: `0` no errors, `1` errors found (warnings too with `--strict`),
 |---|---|---|
 | `utf8-bom` | error | UTF-8 BOM — KiCad rejects the file (PowerShell's `Out-File -Encoding utf8` adds one) |
 | `encoding` | error | not valid UTF-8, with the offending line |
-| `unbalanced` | error | stray `)` / never-closed `(` / unterminated string — **with the line it was opened on** (quote-aware, so parens inside strings don't confuse it) |
+| `unbalanced` | error / warning | never-closed `(` and unterminated strings are errors — **with the line they were opened on** (quote-aware, so parens inside strings don't confuse it); stray `)` is a warning, because KiCad itself tolerates those (an official demo board ships with hundreds) while stricter tools choke |
 | `missing-lib-symbol` | error | a `.kicad_sch` symbol instance references a `lib_id` with no `lib_symbols` definition — **KiCad loads without any error** and the symbol's pins silently fail to connect; ERC then reports confusing `unconnected_wire_endpoint` warnings nearby |
-| `dup-reference` | error | duplicate footprint references — Specctra DSN export fails *silently* (0-byte file); unannotated `REF**` / `MH?` placeholders get a hint |
 | `fp-library-field` | error | `(version/generator ...)` library-file headers inside a footprint *instance* — KiCad 10 rejects the board |
+| `dup-reference` | warning | duplicate footprint references — legal in KiCad (stitching-via arrays use them on purpose) but Specctra DSN export fails *silently* (0-byte file); unannotated `REF**` / `MH?` placeholders get a hint |
 | `sheet-path` | warning | footprint `path` ending in `/` (no component UUID) — usually a netlist parsed with the wrong `tstamps`; update-from-schematic may not match |
 | `float-precision` | warning | numbers with >6 decimals — script-written full-repr floats have broken KiCad 10 loads; prime suspects when a file won't open |
-| `grtext-newline` / `grtext-justify` | warning | `\n` escapes and `(justify ...)` in top-level `gr_text` — observed to break some KiCad 10 builds |
 | `summary` | info | footprint/pad/segment/via/zone counts — catch the "save succeeded but wrote a nearly-empty board" failure by comparing against what you expect |
 
 ### Severity philosophy (and why you can trust it)
 
-Every check was **calibrated against real KiCad-10-saved boards**, not just
-written from folklore:
+Every check was **calibrated against real KiCad-10-saved boards and KiCad's
+own official demo boards**, not just written from folklore:
 
 - `error` = will reject the file or silently break a workflow, reproducibly.
-- `warning` = known to break *some* KiCad builds / specific contexts; on a
-  healthy board you should see few or none.
+- `warning` = known to break *some* KiCad builds / specific workflows
+  (e.g. DSN export); on a healthy board you should see few or none.
 - Checks that folklore says are fatal but real KiCad-saved files contain
-  routinely — `(embedded_fonts ...)` and
+  routinely are **deliberately not flagged**: `(embedded_fonts ...)` and
   `(duplicate_pad_numbers_are_jumpers ...)` inside footprint instances,
-  library fields inside embedded `lib_symbols` — are **deliberately not
-  flagged**. A diagnostic that cries wolf on every healthy file is worse
-  than none.
+  library fields inside embedded `lib_symbols`, `\n` escapes and
+  `(justify ...)` in `gr_text` (6 of 12 official demo boards use multi-line
+  text; one uses 1000+ justified texts — all load fine). A diagnostic that
+  cries wolf on every healthy file is worse than none.
 
 ### CI
 
@@ -80,6 +80,16 @@ written from folklore:
   run: |
     pip install git+https://github.com/94xhn/kicad-file-doctor
     kicad-file-doctor hardware/*.kicad_pcb hardware/*.kicad_sch
+```
+
+### pre-commit
+
+```yaml
+repos:
+  - repo: https://github.com/94xhn/kicad-file-doctor
+    rev: v0.1.0
+    hooks:
+      - id: kicad-file-doctor
 ```
 
 ### Python API

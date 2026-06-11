@@ -56,13 +56,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     reports = []
+    unreadable = 0
     for raw in args.files:
         path = Path(raw)
         try:
             data = path.read_bytes()
         except OSError as exc:
             print(f"error: cannot read {path}: {exc}", file=sys.stderr)
-            return EXIT_USAGE
+            unreadable += 1
+            continue
         report = diagnose(data)
         if args.strict:
             report["findings"] = [
@@ -105,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
             f"{verdict}: {total_errors} error(s), {total_warnings} warning(s) "
             f"across {len(reports)} file(s)"
         )
+    if unreadable:
+        return EXIT_USAGE  # unreadable files outrank diagnostic results
     return EXIT_PROBLEMS if total_errors else EXIT_HEALTHY
 
 

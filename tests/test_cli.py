@@ -49,7 +49,7 @@ def test_strict_promotes_warnings(tmp_path):
 def test_json_output(capsys):
     main([str(EXAMPLES / "broken.kicad_pcb"), "--format", "json"])
     payload = json.loads(capsys.readouterr().out)
-    assert payload["total_errors"] >= 2
+    assert payload["total_errors"] >= 1
     (file_report,) = payload["files"]
     assert file_report["ftype"] == "kicad_pcb"
     assert any(f["check"] == "dup-reference" for f in file_report["findings"])
@@ -66,6 +66,13 @@ def test_multiple_files(capsys):
 def test_missing_file_exits_2(capsys):
     assert main(["nope.kicad_pcb"]) == 2
     assert "cannot read" in capsys.readouterr().err
+
+
+def test_unreadable_file_does_not_block_other_files(capsys):
+    assert main(["nope.kicad_pcb", str(EXAMPLES / "good.kicad_pcb")]) == 2
+    captured = capsys.readouterr()
+    assert "cannot read" in captured.err
+    assert "good.kicad_pcb" in captured.out  # the readable file was still checked
 
 
 def test_version_flag():
